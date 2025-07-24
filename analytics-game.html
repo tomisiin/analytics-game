@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Adventure: A Product Analytics Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .choice-btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .choice-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        #feedback-modal, #loading-overlay {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .spinner {
+            border-top-color: #4f46e5;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 flex items-center justify-center min-h-screen p-4">
+
+    <div id="game-container" class="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-6 md:p-10 relative">
+        <div id="start-screen">
+            <h1 class="text-3xl md:text-4xl font-bold text-center text-indigo-600 mb-4">Analytics Adventure</h1>
+            <p class="text-center text-gray-600 mb-6">Welcome, Product Manager! You've just launched "ConnectSphere," a new social app. Your goal is to grow its user base by making smart, data-driven decisions. This game uses AI to generate unique questions every time. Are you ready?</p>
+            <button id="start-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 choice-btn">Start Your Adventure</button>
+        </div>
+
+        <div id="game-screen" class="hidden">
+            <div class="flex justify-between items-center mb-6">
+                 <div>
+                    <h2 class="text-xl font-bold text-indigo-600">ConnectSphere</h2>
+                    <p id="round-counter" class="text-sm text-gray-500">Round 1 / 10</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">Analytics Score</p>
+                    <p id="score" class="text-2xl font-bold text-green-500">100</p>
+                </div>
+            </div>
+
+            <div id="story-container" class="bg-gray-50 p-4 rounded-lg mb-6 min-h-[80px]">
+                <p id="scenario" class="text-gray-700"></p>
+            </div>
+
+            <div id="question-container">
+                <p id="question" class="text-lg font-semibold mb-4 min-h-[56px]"></p>
+                <div id="choices" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Choices will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="absolute inset-0 bg-white bg-opacity-80 flex-col items-center justify-center rounded-xl hidden">
+            <div class="spinner w-12 h-12 rounded-full border-4 border-gray-200"></div>
+            <p class="mt-4 text-gray-600 font-semibold">Generating your next challenge...</p>
+        </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 hidden opacity-0">
+        <div class="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
+            <h3 id="feedback-title" class="text-2xl font-bold mb-3"></h3>
+            <p id="feedback-text" class="text-gray-700 mb-6"></p>
+            <button id="next-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 choice-btn">Continue</button>
+        </div>
+    </div>
+
+    <script>
+        const startScreen = document.getElementById('start-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const startBtn = document.getElementById('start-btn');
+        const scoreEl = document.getElementById('score');
+        const roundCounterEl = document.getElementById('round-counter');
+        const scenarioEl = document.getElementById('scenario');
+        const questionEl = document.getElementById('question');
+        const choicesEl = document.getElementById('choices');
+        const feedbackModal = document.getElementById('feedback-modal');
+        const feedbackTitleEl = document.getElementById('feedback-title');
+        const feedbackTextEl = document.getElementById('feedback-text');
+        const nextBtn = document.getElementById('next-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        let score = 100;
+        let currentRound = 0;
+        const totalRounds = 10;
+        let currentScenario = "a new social media app called ConnectSphere";
+
+        async function fetchNextQuestion() {
+            setLoading(true);
+            
+            const prompt = `
+                You are a product analytics quiz generator. Create a realistic scenario for a product manager of ${currentScenario}.
+                The scenario should present a common business problem related to user growth, engagement, retention, or monetization.
+                Based on the scenario, create one clear question and four multiple-choice answers.
+
+                The choices must follow these rules:
+                1. One choice must be the clear "best" answer, demonstrating a strong, data-driven, and user-centric approach. This should have a positive scoreChange (between +20 and +25).
+                2. One or two choices should be plausible but suboptimal, perhaps a common mistake or a less effective strategy. These should have a small negative scoreChange (between -5 and -15).
+                3. One choice should be a clear "bad" answer, demonstrating a poor understanding of product analytics (e.g., relying purely on gut feeling, ignoring data, harming user experience). This should have a large negative scoreChange (between -20 and -30).
+                4. Every choice MUST have detailed, educational feedback explaining WHY it's a good or bad choice.
+                5. The sum of scoreChanges does not need to be zero.
+
+                Return the result as a single JSON object matching this exact schema:
+                {
+                  "scenario": "A short scenario text.",
+                  "question": "The question for the user.",
+                  "choices": [
+                    { "text": "Choice 1 text.", "scoreChange": 20, "feedback": "Feedback for choice 1." },
+                    { "text": "Choice 2 text.", "scoreChange": -10, "feedback": "Feedback for choice 2." },
+                    { "text": "Choice 3 text.", "scoreChange": -25, "feedback": "Feedback for choice 3." },
+                    { "text": "Choice 4 text.", "scoreChange": -5, "feedback": "Feedback for choice 4." }
+                  ]
+                }
+            `;
+
+            try {
+                const apiKey = ""; // API key is handled by the environment
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                
+                const payload = {
+                    contents: [{ role: "user", parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                    }
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API call failed with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const gameData = JSON.parse(jsonText);
+                    updateUI(gameData);
+                } else {
+                    throw new Error("Invalid response structure from API.");
+                }
+
+            } catch (error) {
+                console.error("Error fetching question:", error);
+                // Display an error message and allow the user to try again.
+                scenarioEl.textContent = "Oops! We couldn't generate the next question. Please check your connection or try again.";
+                questionEl.textContent = "";
+                choicesEl.innerHTML = `<button onclick="fetchNextQuestion()" class="w-full bg-red-500 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-600 choice-btn">Try Again</button>`;
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        function startGame() {
+            startScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+            score = 100;
+            currentRound = 0;
+            proceedToNextStage();
+        }
+
+        function updateUI(stage) {
+            currentRound++;
+            roundCounterEl.textContent = `Round ${currentRound} / ${totalRounds}`;
+            scoreEl.textContent = score;
+            scenarioEl.textContent = stage.scenario;
+            questionEl.textContent = stage.question;
+            choicesEl.innerHTML = '';
+            
+            // Randomize choices order
+            stage.choices.sort(() => Math.random() - 0.5);
+
+            stage.choices.forEach(choice => {
+                const button = document.createElement('button');
+                button.textContent = choice.text;
+                button.className = "w-full text-left p-4 bg-white border-2 border-gray-200 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-300 choice-btn";
+                button.onclick = () => handleChoice(choice);
+                choicesEl.appendChild(button);
+            });
+        }
+
+        function handleChoice(choice) {
+            score += choice.scoreChange;
+            if (score < 0) score = 0;
+            scoreEl.textContent = score;
+
+            if (score > 120) {
+                scoreEl.className = 'text-2xl font-bold text-green-500';
+            } else if (score > 60) {
+                scoreEl.className = 'text-2xl font-bold text-yellow-500';
+            } else {
+                scoreEl.className = 'text-2xl font-bold text-red-500';
+            }
+
+            feedbackTitleEl.textContent = choice.scoreChange > 0 ? "Good Choice!" : "Hmm, let's rethink that...";
+            feedbackTitleEl.className = `text-2xl font-bold mb-3 ${choice.scoreChange > 0 ? 'text-green-500' : 'text-red-500'}`;
+            feedbackTextEl.textContent = choice.feedback;
+
+            feedbackModal.classList.remove('hidden');
+            setTimeout(() => feedbackModal.classList.remove('opacity-0'), 10);
+        }
+        
+        function proceedToNextStage() {
+            feedbackModal.classList.add('opacity-0');
+            setTimeout(() => {
+                feedbackModal.classList.add('hidden');
+                if (score <= 0 || currentRound >= totalRounds) {
+                    endGame();
+                } else {
+                    fetchNextQuestion();
+                }
+            }, 300);
+        }
+        
+        function setLoading(isLoading) {
+            if (isLoading) {
+                loadingOverlay.classList.remove('hidden');
+                loadingOverlay.classList.add('flex');
+            } else {
+                loadingOverlay.classList.add('hidden');
+                loadingOverlay.classList.remove('flex');
+            }
+        }
+
+        function endGame() {
+            let title, message;
+            if (score >= 150) {
+                title = "Product Legend! 🚀";
+                message = "Incredible! Your data-driven decisions have turned ConnectSphere into a massive success. You truly understand the art and science of product analytics.";
+            } else if (score >= 80) {
+                title = "Solid PM! 👍";
+                message = "Great job! You navigated the challenges well and made mostly solid, data-informed choices. ConnectSphere is growing steadily thanks to you.";
+            } else {
+                title = "Back to the Drawing Board 😬";
+                message = "Oh no! A few risky bets led ConnectSphere astray. Don't worry, every PM has setbacks. Time to analyze what went wrong and try again!";
+            }
+
+            gameScreen.innerHTML = `
+                <h1 class="text-3xl md:text-4xl font-bold text-center text-indigo-600 mb-4">${title}</h1>
+                <p class="text-center text-gray-600 mb-2">Your Final Analytics Score: <span class="font-bold text-2xl ${score >= 80 ? 'text-green-500' : 'text-red-500'}">${score}</span></p>
+                <p class="text-center text-gray-700 bg-gray-50 p-4 rounded-lg mb-6">${message}</p>
+                <button id="restart-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 choice-btn">Play Again</button>
+            `;
+            
+            document.getElementById('restart-btn').addEventListener('click', () => {
+                 window.location.reload();
+            });
+        }
+
+        startBtn.addEventListener('click', startGame);
+        nextBtn.addEventListener('click', proceedToNextStage);
+
+    </script>
+</body>
+</html>
